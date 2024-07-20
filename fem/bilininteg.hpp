@@ -2289,6 +2289,125 @@ public:
    Coefficient *GetCoefficient() const { return Q; }
 };
 
+
+
+/** Class for integrating the bilinear form $a(u,v) := (Q \nabla u, \nabla v)$ where $Q$
+    can be a scalar or a matrix coefficient. */
+class HMMIntegrator: public BilinearFormIntegrator
+{
+protected:
+   Coefficient *Q;
+   VectorCoefficient *VQ;
+   MatrixCoefficient *MQ;
+
+private:
+   Vector vec, vecdxt, pointflux, shape;
+#ifndef MFEM_THREAD_SAFE
+   DenseMatrix dshape, dshapedxt, invdfdx, M, dshapedxt_m;
+   DenseMatrix te_dshape, te_dshapedxt;
+   Vector D;
+#endif
+
+   // PA extension
+   const FiniteElementSpace *fespace;
+   const DofToQuad *maps;         ///< Not owned
+   const GeometricFactors *geom;  ///< Not owned
+   int dim, ne, dofs1D, quad1D;
+   Vector pa_data;
+   bool symmetric = true; ///< False if using a nonsymmetric matrix coefficient
+
+   // Data for NURBS patch PA
+
+   // Type for a variable-row-length 2D array, used for data related to 1D
+   // quadrature rules in each dimension.
+   typedef std::vector<std::vector<int>> IntArrayVar2D;
+
+   int numPatches = 0;
+   static constexpr int numTypes = 2;  // Number of rule types
+
+   // In the case integrationMode == Mode::PATCHWISE_REDUCED, an approximate
+   // integration rule with sparse nonzero weights is computed by NNLSSolver,
+   // for each 1D basis function on each patch, in each spatial dimension. For a
+   // fixed 1D basis function b_i with DOF index i, in the tensor product basis
+   // of patch p, the prescribed exact 1D rule is of the form
+   // \sum_k a_{i,j,k} w_k for some integration points indexed by k, with
+   // weights w_k and coefficients a_{i,j,k} depending on Q(x), an element
+   // transformation, b_i, and b_j, for all 1D basis functions b_j whose support
+   // overlaps that of b_i. Define the constraint matrix G = [g_{j,k}] with
+   // g_{j,k} = a_{i,j,k} and the vector of exact weights w = [w_k]. A reduced
+   // rule should have different weights w_r, many of them zero, and should
+   // approximately satisfy Gw_r = Gw. A sparse approximate solution to this
+   // underdetermined system is computed by NNLSSolver, and its data is stored
+   // in the following members.
+
+   // For each patch p, spatial dimension d (total dim), and rule type t (total
+   // numTypes), an std::vector<Vector> of reduced quadrature weights for all
+   // basis functions is stored in reducedWeights[t + numTypes * (d + dim * p)],
+   // reshaped as rw(t,d,p). Note that nd may vary with respect to the patch and
+   // spatial dimension. Array reducedIDs is treated similarly.
+   std::vector<std::vector<Vector>> reducedWeights;
+   std::vector<IntArrayVar2D> reducedIDs;
+   std::vector<Array<int>> pQ1D, pD1D;
+   std::vector<std::vector<Array2D<real_t>>> pB, pG;
+   std::vector<IntArrayVar2D> pminD, pmaxD, pminQ, pmaxQ, pminDD, pmaxDD;
+
+   std::vector<Array<const IntegrationRule*>> pir1d;
+   /*
+   void SetupPatchPA(const int patch, Mesh *mesh, bool unitWeights=false);
+
+   void SetupPatchBasisData(Mesh *mesh, unsigned int patch);*/
+
+   /** Called by AssemblePatchMatrix for sparse matrix assembly on a NURBS patch
+    with full 1D quadrature rules. */
+    /*
+   void AssemblePatchMatrix_fullQuadrature(const int patch,
+                                           const FiniteElementSpace &fes,
+                                           SparseMatrix*& smat);
+                                           */
+
+   /** Called by AssemblePatchMatrix for sparse matrix assembly on a NURBS patch
+    with reduced 1D quadrature rules. */
+   /*
+   void AssemblePatchMatrix_reducedQuadrature(const int patch,
+                                              const FiniteElementSpace &fes,
+                                              SparseMatrix*& smat);
+   */
+                                              
+public:
+   /// Construct a diffusion integrator with coefficient Q = 1
+   HMMIntegrator(const IntegrationRule *ir = nullptr)
+      : BilinearFormIntegrator(ir),
+        Q(NULL), VQ(NULL), MQ(NULL), maps(NULL), geom(NULL) { }
+
+   /// Construct a diffusion integrator with a scalar coefficient q
+   HMMIntegrator(Coefficient &q, const IntegrationRule *ir = nullptr)
+      : BilinearFormIntegrator(ir),
+        Q(&q), VQ(NULL), MQ(NULL), maps(NULL), geom(NULL) { }
+
+   /// Construct a diffusion integrator with a vector coefficient q
+   HMMIntegrator(VectorCoefficient &q,
+                       const IntegrationRule *ir = nullptr)
+      : BilinearFormIntegrator(ir),
+        Q(NULL), VQ(&q), MQ(NULL), maps(NULL), geom(NULL) { }
+
+   /// Construct a diffusion integrator with a matrix coefficient q
+   HMMIntegrator(MatrixCoefficient &q,
+                       const IntegrationRule *ir = nullptr)
+      : BilinearFormIntegrator(ir),
+        Q(NULL), VQ(NULL), MQ(&q), maps(NULL), geom(NULL) { }
+
+   /** Given a particular Finite Element computes the element stiffness matrix
+       elmat. */
+   virtual void AssembleElementMatrix(const FiniteElement &el,
+                                      ElementTransformation &Trans,
+                                      DenseMatrix &elmat);
+   
+   static const IntegrationRule &GetRule(const FiniteElement &trial_fe,
+                                         const FiniteElement &test_fe);
+
+};
+
+
 /** Class for local mass matrix assembling $a(u,v) := (Q u, v)$ */
 class MassIntegrator: public BilinearFormIntegrator
 {

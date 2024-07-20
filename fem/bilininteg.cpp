@@ -928,6 +928,163 @@ void DiffusionIntegrator::AssembleElementMatrix
    }
 }
 
+
+
+void HMMIntegrator::AssembleElementMatrix
+( const FiniteElement &el, ElementTransformation &Trans,
+  DenseMatrix &elmat )
+{
+   int nd = el.GetDof();
+   dim = el.GetDim();
+   int spaceDim = Trans.GetSpaceDim();
+   bool square = (dim == spaceDim);
+   real_t w;
+
+   if (VQ)
+   {
+      MFEM_VERIFY(VQ->GetVDim() == spaceDim,
+                  "Unexpected dimension for VectorCoefficient");
+   }
+   if (MQ)
+   {
+      MFEM_VERIFY(MQ->GetWidth() == spaceDim,
+                  "Unexpected width for MatrixCoefficient");
+      MFEM_VERIFY(MQ->GetHeight() == spaceDim,
+                  "Unexpected height for MatrixCoefficient");
+   }
+
+#ifdef MFEM_THREAD_SAFE
+   DenseMatrix dshape(nd, dim), dshapedxt(nd, spaceDim);
+   DenseMatrix dshapedxt_m(nd, MQ ? spaceDim : 0);
+   DenseMatrix M(MQ ? spaceDim : 0);
+   Vector D(VQ ? VQ->GetVDim() : 0);
+#else
+   dshape.SetSize(nd, dim);
+   dshapedxt.SetSize(nd, spaceDim);
+   dshapedxt_m.SetSize(nd, MQ ? spaceDim : 0);
+   M.SetSize(MQ ? spaceDim : 0);
+   D.SetSize(VQ ? VQ->GetVDim() : 0);
+#endif
+   elmat.SetSize(nd);
+
+   const IntegrationRule *ir = IntRule ? IntRule : &GetRule(el, el);
+
+   const NURBSFiniteElement *NURBSFE =
+      dynamic_cast<const NURBSFiniteElement *>(&el);
+
+   bool deleteRule = false;
+   if (NURBSFE && patchRules)
+   {
+      const int patch = NURBSFE->GetPatch();
+      const int* ijk = NURBSFE->GetIJK();
+      Array<const KnotVector*>& kv = NURBSFE->KnotVectors();
+      ir = &patchRules->GetElementRule(NURBSFE->GetElement(), patch, ijk, kv,
+                                       deleteRule);
+   }
+
+   elmat = 0.0;
+   for (int i = 0; i < ir->GetNPoints(); i++)
+   {
+
+      const IntegrationPoint &ip = ir->IntPoint(i);
+      el.CalcDShape(ip, dshape);
+
+      Trans.SetIntPoint(&ip);
+      w = Trans.Weight();
+      w = ip.weight / (square ? w : w*w*w);
+      // AdjugateJacobian = / adj(J),         if J is square
+      //                    \ adj(J^t.J).J^t, otherwise
+      Mult(dshape, Trans.AdjugateJacobian(), dshapedxt);
+      
+      //Start of HMM 
+      std::cout << "Start of HMM  " << std::endl;
+      {
+      string mesh_file = "/home/kchockalingam/mfem-4.7/data/star.mesh";
+      int order = 1;
+
+      // 2. Read the mesh from the given mesh file, and refine once uniformly.
+      Mesh mesh(mesh_file);
+      //mesh.UniformRefinement();
+
+      // 3. Define a finite element space on the mesh. Here we use H1 continuous
+      //    high-order Lagrange finite elements of the given order.
+      H1_FECollection fec(order, mesh.Dimension());
+      FiniteElementSpace fespace(&mesh, &fec);
+      cout << "Number of unknowns: " << fespace.GetTrueVSize() << endl;
+
+      // 4. Extract the list of all the boundary DOFs. These will be marked as
+      //    Dirichlet in order to enforce zero boundary conditions.
+      Array<int> boundary_dofs;
+      fespace.GetBoundaryTrueDofs(boundary_dofs);
+
+      // 5. Define the solution x as a finite element grid function in fespace. Set
+      //    the initial guess to zero, which also sets the boundary conditions.
+      GridFunction x(&fespace);
+      x = 0.0;
+
+      std::cout << "Middle of HMM  " << std::endl;
+      // 6. Set up the linear form b(.) corresponding to the right-hand side.
+      ConstantCoefficient one(1.0);
+      LinearForm b(&fespace);
+      b.AddDomainIntegrator(new DomainLFIntegrator(one));
+      b.Assemble();
+
+      std::cout << "After LF integrator of HMM  " << std::endl;
+
+      // 7. Set up the bilinear form a(.,.) corresponding to the -Delta operator.
+      BilinearForm a(&fespace);
+      a.AddDomainIntegrator(new DiffusionIntegrator);
+      a.Assemble();
+
+      std::cout << "After domain integrator of HMM  " << std::endl;
+
+      // 8. Form the linear system A X = B. This includes eliminating boundary
+      //    conditions, applying AMR constraints, and other transformations.
+      SparseMatrix A;
+      Vector B, X;
+      a.FormLinearSystem(boundary_dofs, x, b, A, X, B);
+
+      // 9. Solve the system using PCG with symmetric Gauss-Seidel preconditioner.
+      GSSmoother M(A);
+      PCG(A, M, B, X, 1, 200, 1e-12, 0.0);
+
+      // 10. Recover the solution x as a grid function and save to file. The output
+      //     can be viewed using GLVis as follows: "glvis -m mesh.mesh -g sol.gf"
+      a.RecoverFEMSolution(X, b, x);
+      x.Save("sol.gf");
+      mesh.Save("mesh.mesh");
+      } // End of HMM
+      std::cout << "End of HMM  " << std::endl;
+
+      if (MQ)
+      {
+         MQ->Eval(M, Trans, ip);
+         M *= w;
+         Mult(dshapedxt, M, dshapedxt_m);
+         AddMultABt(dshapedxt_m, dshapedxt, elmat);
+      }
+      else if (VQ)
+      {
+         VQ->Eval(D, Trans, ip);
+         D *= w;
+         AddMultADAt(dshapedxt, D, elmat);
+      }
+      else
+      {
+         if (Q)
+         {
+            w *= Q->Eval(Trans, ip);
+         }
+         AddMult_a_AAt(w, dshapedxt, elmat);
+      }
+   }
+
+   if (deleteRule)
+   {
+      delete ir;
+   }
+}
+
 void DiffusionIntegrator::AssembleElementMatrix2(
    const FiniteElement &trial_fe, const FiniteElement &test_fe,
    ElementTransformation &Trans, DenseMatrix &elmat)
@@ -1270,6 +1427,28 @@ real_t DiffusionIntegrator::ComputeFluxEnergy
 }
 
 const IntegrationRule &DiffusionIntegrator::GetRule(
+   const FiniteElement &trial_fe, const FiniteElement &test_fe)
+{
+   int order;
+   if (trial_fe.Space() == FunctionSpace::Pk)
+   {
+      order = trial_fe.GetOrder() + test_fe.GetOrder() - 2;
+   }
+   else
+   {
+      // order = 2*el.GetOrder() - 2;  // <-- this seems to work fine too
+      order = trial_fe.GetOrder() + test_fe.GetOrder() + trial_fe.GetDim() - 1;
+   }
+
+   if (trial_fe.Space() == FunctionSpace::rQk)
+   {
+      return RefinedIntRules.Get(trial_fe.GetGeomType(), order);
+   }
+   return IntRules.Get(trial_fe.GetGeomType(), order);
+}
+
+
+const IntegrationRule &HMMIntegrator::GetRule(
    const FiniteElement &trial_fe, const FiniteElement &test_fe)
 {
    int order;
