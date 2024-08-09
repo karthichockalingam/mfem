@@ -3859,7 +3859,7 @@ void Mesh::Make3D24TetsFromHex(int nx, int ny, int nz,
 
 void Mesh::Make2D(int nx, int ny, Element::Type type,
                   real_t sx, real_t sy,
-                  bool generate_edges, bool sfc_ordering)
+                  bool generate_edges, bool sfc_ordering, real_t ox, real_t oy)
 {
    int i, j, k;
 
@@ -3885,10 +3885,10 @@ void Mesh::Make2D(int nx, int ny, Element::Type type,
       k = 0;
       for (j = 0; j < ny+1; j++)
       {
-         cy = ((real_t) j / ny) * sy;
+         cy = oy + ((real_t) j / ny) * sy;
          for (i = 0; i < nx+1; i++)
          {
-            cx = ((real_t) i / nx) * sx;
+            cx = ox + ((real_t) i / nx) * sx;
             vertices[k](0) = cx;
             vertices[k](1) = cy;
             k++;
@@ -4242,10 +4242,10 @@ Mesh Mesh::MakeCartesian1D(int n, real_t sx)
 
 Mesh Mesh::MakeCartesian2D(
    int nx, int ny, Element::Type type, bool generate_edges,
-   real_t sx, real_t sy, bool sfc_ordering)
+   real_t sx, real_t sy, bool sfc_ordering, real_t ox, real_t oy)
 {
    Mesh mesh;
-   mesh.Make2D(nx, ny, type, sx, sy, generate_edges, sfc_ordering);
+   mesh.Make2D(nx, ny, type, sx, sy, generate_edges, sfc_ordering, ox, oy);
    mesh.Finalize(true); // refine = true
    return mesh;
 }

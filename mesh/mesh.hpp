@@ -610,7 +610,7 @@ protected:
    /// @a type = QUADRILATERAL) are ordered: true - use space-filling curve
    /// ordering, or false - use lexicographic ordering.
    void Make2D(int nx, int ny, Element::Type type, real_t sx, real_t sy,
-               bool generate_edges, bool sfc_ordering);
+               bool generate_edges, bool sfc_ordering, real_t ox = 0.0, real_t oy = 0.0);
 
    /// @a brief Creates a 1D mesh for the interval [0,sx] divided into n equal
    /// intervals.
@@ -766,7 +766,7 @@ public:
    /// ordering, or false - use lexicographic ordering.
    static Mesh MakeCartesian2D(
       int nx, int ny, Element::Type type, bool generate_edges = false,
-      real_t sx = 1.0, real_t sy = 1.0, bool sfc_ordering = true);
+      real_t sx = 1.0, real_t sy = 1.0, bool sfc_ordering = true, real_t ox = 0.0, real_t oy = 0.0);
 
    /// @brief Creates a mesh for the parallelepiped [0,sx]x[0,sy]x[0,sz],
    /// divided into nx*ny*nz hexahedra if @a type = HEXAHEDRON or into
