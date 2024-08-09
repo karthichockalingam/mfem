@@ -52,36 +52,54 @@ int main (int argc, char *argv[])
    FiniteElementSpace fespace_macro(&mesh_macro, fec);
    FiniteElementSpace fespace_micro(&mesh_micro, fec);
 
+   Array<int> boundary_dofs;
+   fespace_micro.GetBoundaryTrueDofs(boundary_dofs);
 
-   int bnd_pts = 2 * mesh_micro.GetNBE();
+   Array<int> dofs; //to store edge dofs
+
+   set<int> dof_set;
+   
+   int bnd_pts =  boundary_dofs.Size();
    Vector vxy(bnd_pts * dim);
+   int* dof_ids = new int[bnd_pts];
+   int count = 0;
 
    for (int i = 0; i < mesh_micro.GetNBE(); i++)
    {
       const FiniteElement * elem = fespace_micro.GetBE(i);
       const IntegrationRule & ir = elem->GetNodes();
+       
+      fespace_micro.GetBdrElementDofs(i, dofs);
 
       FaceElementTransformations * T = mesh_micro.GetBdrFaceTransformations(i);
       DenseMatrix P;
       T->Transform(ir, P);
+
+      assert(("The size of dof should be same ir", dofs.Size()  == ir.Size()));
       
       for (int j = 0; j < ir.Size(); j++)
       {
-        //std::cout <<   P(0, j) << "  " << P(1, j) << std::endl;
-        vxy((2*i)+j)           = P(0, j);
-        vxy(bnd_pts + (2*i)+j) = P(1, j);
+       // std::cout << "DOF# " << dofs[j] << "  "  << P(0, j) << "  " << P(1, j) << std::endl;
+  
+       if(dof_set.find(dofs[j]) == dof_set.end())
+        {
+        vxy(count)             = P(0, j);
+        vxy(bnd_pts + (count)) = P(1, j);
+        dof_set.insert(dofs[j]); 
+        dof_ids[count] = dofs[j];
+        count = count + 1;
+        }
       }
    }
   
    FindPointsGSLIB finder_pos;
    finder_pos.FindPoints(mesh_macro, vxy);
    
-   
    auto obj_elem = finder_pos.GetGSLIBElem();
    auto obj_ref_pos = finder_pos.GetReferencePosition();
    //auto obj_ref_pos = finder_pos.GetGSLIBReferencePosition();
 
-   std::cout << "Boundary points:" << bnd_pts << std::endl;
+   //std::cout << "Boundary points:" << bnd_pts << " Count = " << count << std::endl;
 
    IntegrationPoint ip;
    BiLinear2DFiniteElement bilinear_elem;
@@ -92,7 +110,8 @@ int main (int argc, char *argv[])
       ip.Set2(obj_ref_pos(i*dim + 0), obj_ref_pos(i*dim + 1));
       bilinear_elem.CalcShape(ip, shape);
 
-      std::cout << obj_elem[i] << " " << obj_ref_pos(i*dim + 0) << "  " << obj_ref_pos(i*dim + 1) << "  " << shape(0) << std::endl;
+      //std::cout << obj_elem[i] << " DOF # " << dof_ids[i]  << "  " << obj_ref_pos(i*dim + 0) << "  " << obj_ref_pos(i*dim + 1) << "  " << shape(0) << std::endl;
+      std::cout << " DOF # " << dof_ids[i]  << "  x =  " <<  vxy(i) << "  y =   " << vxy(bnd_pts + i) << "  macro_value =  " << shape(0) << std::endl;
    }
    
    //Note all micro bnd nodes are found on the same macro element
