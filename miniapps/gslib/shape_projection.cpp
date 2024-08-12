@@ -40,12 +40,34 @@ int main (int argc, char *argv[])
                                      true, 2.0, 2.0);
    
    Mesh mesh_micro = Mesh::MakeCartesian2D(4, 4, mfem::Element::Type::QUADRILATERAL,
-                                     true, 0.8, 0.8);
-   
-   int dim = mesh_macro.Dimension();
+                                     true, 0.8, 0.8, true, 0.1, 0.1);
 
-   mesh_micro.SetCurvature(1, false, dim, 0); 
-   mesh_macro.SetCurvature(1, false, dim, 0); 
+   int dim = mesh_macro.Dimension();
+/*
+   Vector vert_coord;
+
+   mesh_micro.GetNodes(vert_coord);
+   int nv = vert_coord.Size()/dim;
+
+   for (int i = 0; i < nv; i++)
+   {
+      vert_coord(0*nv+i) += 0.1;
+      vert_coord(1*nv+i) += 0.1;
+   }
+*/
+   Vector vert_coord_copy;
+
+   mesh_micro.GetNodes(vert_coord_copy);
+   int nv = vert_coord_copy.Size()/dim;
+
+   for (int i = 0; i < nv; i++)
+   {
+      std::cout << i << "  " << vert_coord_copy(0*nv+i) << "  " << vert_coord_copy(1*nv+i) << std::endl;
+   }
+
+   int order = 1;
+   mesh_micro.SetCurvature(order, false, dim, 0); 
+   mesh_macro.SetCurvature(order, false, dim, 0); 
 
    FiniteElementCollection *fec = new H1_FECollection(1, dim);
 
@@ -105,6 +127,9 @@ int main (int argc, char *argv[])
    BiLinear2DFiniteElement bilinear_elem;
    Vector shape(dim*dim);
 
+   GridFunction u_micro_gf(&fespace_micro);
+   u_micro_gf = 0.0;
+
    for (int i = 0; i < bnd_pts; i++)
    {
       ip.Set2(obj_ref_pos(i*dim + 0), obj_ref_pos(i*dim + 1));
@@ -112,14 +137,56 @@ int main (int argc, char *argv[])
 
       //std::cout << obj_elem[i] << " DOF # " << dof_ids[i]  << "  " << obj_ref_pos(i*dim + 0) << "  " << obj_ref_pos(i*dim + 1) << "  " << shape(0) << std::endl;
       std::cout << " DOF # " << dof_ids[i]  << "  x =  " <<  vxy(i) << "  y =   " << vxy(bnd_pts + i) << "  macro_value =  " << shape(0) << std::endl;
+      u_micro_gf(dof_ids[i]) = shape(0);
    }
+
+   GridFunctionCoefficient u_micro_cgf(&u_micro_gf);
+
+   Array<int> ess_tdof_list;
+   Array<int> ess_bdr(mesh_micro.bdr_attributes.Max());
+   ess_bdr = 1;
+   fespace_micro.GetEssentialTrueDofs(ess_bdr, ess_tdof_list);
+
+
+   GridFunction x(&fespace_micro);
+   x = 0.0;
+
+   x.ProjectBdrCoefficient(u_micro_cgf, ess_bdr);
+
+   // 6. Set up the linear form b(.) corresponding to the right-hand side.
+   ConstantCoefficient zero(0.0);
+   LinearForm b(&fespace_micro);
+   b.AddDomainIntegrator(new DomainLFIntegrator(zero));
+   b.Assemble();
+
+   // 7. Set up the bilinear form a(.,.) corresponding to the -Delta operator.
+   BilinearForm a(&fespace_micro);
+   a.AddDomainIntegrator(new DiffusionIntegrator);
+   a.Assemble();
+
+   // 8. Form the linear system A X = B. This includes eliminating boundary
+   //    conditions, applying AMR constraints, and other transformations.
+   SparseMatrix A;
+   Vector B, X;
+   a.FormLinearSystem(ess_tdof_list, x, b, A, X, B);
+
+   // 9. Solve the system using PCG with symmetric Gauss-Seidel preconditioner.
+   GSSmoother M(A);
+   PCG(A, M, B, X, 1, 200, 1e-12, 0.0);
+
+   // 10. Recover the solution x as a grid function and save to file. The output
+   //     can be viewed using GLVis as follows: "glvis -m mesh.mesh -g sol.gf"
+   a.RecoverFEMSolution(X, b, x);
+
+   ParaViewDataCollection pd("Diffusion", &mesh_micro);
+   pd.SetPrefixPath("ParaView");
+   pd.RegisterField("solution", &x);
+   pd.SetLevelsOfDetail(order);
+   pd.SetDataFormat(VTKFormat::BINARY);
+   pd.SetHighOrderOutput(true);
+   pd.SetCycle(0);
+   pd.SetTime(0.0);
+   pd.Save();
    
-   //Note all micro bnd nodes are found on the same macro element
-   //Element * elem = mesh_macro.GetElement(obj_elem[0]);
-  
-  // ip.Set2(const real_t x1, const real_t x2);
-
-  // CalcShape(const IntegrationPoint &ip, Vector &shape) const;
-
    return 0;
 }
